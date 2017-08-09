@@ -1,9 +1,15 @@
 ## Get the data 
 library(readxl)
+library(rpart)
+library(rpart.plot)
 creditCardData <- read_excel("c://Users/mjaviya/Desktop/ccc.xls")
 ## check for missing values
 summary(creditCardData)
 sum(is.na.data.frame(creditCardData))
+
+normalizeRange <- function(values) {
+  (values-min(values))/(max(values)-min(values))
+}
 
 ## Assign proper names to column
 colnames(creditCardData) <- c("Id", "Limit", "Gender", "EducationStatus", "MarritalStatus", "Age", "SeptemberStatus",
@@ -114,7 +120,6 @@ creditCardData$AprilRem <- creditCardData$AprilBill - creditCardData$AprilPaid
 creditCardData$TotalRem <- creditCardData$SeptemberRem + creditCardData$AugustRem + creditCardData$JulyRem + creditCardData$JuneRem + creditCardData$MayRem + creditCardData$AprilRem
 creditCardData$RemToLimit <- (creditCardData$TotalRem / creditCardData$Limit) * 100
 
-
 ## Remove outliers based on Limit
 x <- creditCardData$Limit
 qnt <- quantile(x, probs=c(.25, .75), na.rm = T)
@@ -142,6 +147,18 @@ pctOfMaleDefault <- (noOfMaleDefault * 100)/noOfMale
 pctOfFemaleDefault <- (noOfFemaleDefault * 100)/noOfFemale
 
 
+
+## Normalize Bill and limit variables
+creditCardData$Limit <- normalizeRange(creditCardData$Limit)
+creditCardData$SeptemberRem <- normalizeRange(creditCardData$SeptemberRem)
+creditCardData$AugustRem <- normalizeRange(creditCardData$AugustRem)
+creditCardData$JulyRem <- normalizeRange(creditCardData$JulyRem)
+creditCardData$JuneRem <- normalizeRange(creditCardData$JuneRem)
+creditCardData$MayRem <- normalizeRange(creditCardData$MayRem)
+creditCardData$AprilRem <- normalizeRange(creditCardData$AprilRem)
+creditCardData$RemToLimit <- normalizeRange(creditCardData$RemToLimit)
+
+
 ## Model 1
 ## Split data into 2 parts by ratio of 7:3
 temp <- sort(sample(nrow(creditCardData), nrow(creditCardData)*0.7))
@@ -159,18 +176,17 @@ summary(logisticModel1)
 
 ## Building revised model after removing non-significant variables from model 1
 logisticModel2 <- glm(DefaultPayment ~ Gender + EducationStatus + MarritalStatus + SeptemberStatus 
-                      + AugustStatus + MayStatus + AprilStatus + SeptemberRem + AugustRem
-                      + JulyRem + JuneRem + MayRem + AprilRem + RemToLimit, data=trainingSet, family="binomial")
+                      + AugustStatus + JuneStatus + MayStatus + AprilStatus + RemToLimit, data=trainingSet, family="binomial")
 summary(logisticModel2)
 
 ## Model 3
 logisticModel3 <- glm(DefaultPayment ~ Gender + EducationStatus + MarritalStatus + SeptemberStatus 
-                      + AugustStatus + MayStatus + AprilStatus + SeptemberRem + JuneRem + RemToLimit, data=trainingSet, family="binomial")
+                      + AugustStatus + MayStatus + AprilStatus, data=trainingSet, family="binomial")
 summary(logisticModel3)
 
 ## Model 4
 logisticModel4 <- glm(DefaultPayment ~ Gender + EducationStatus + MarritalStatus + SeptemberStatus 
-                      + AugustStatus + MayStatus + AprilStatus + JuneRem + RemToLimit , data=trainingSet, family="binomial")
+                      + AugustStatus + MayStatus + AprilStatus, data=trainingSet, family="binomial")
 summary(logisticModel4)
 
 ## We got all the effect as significant now. So our model seems to fit the data
@@ -178,7 +194,7 @@ summary(logisticModel4)
 testSet$probabilityScore <- predict(logisticModel4, newdata = testSet, type = "response")
 
 ## calculating top 3 variables affecting result
-top3<-predict(logisticModel3,type='terms',testSet)
+top3<-predict(logisticModel4,type='terms',testSet)
 
 findtopReasons <- function(x,top=3){
   res=names(x)[order(x, decreasing = TRUE)][1:top]
@@ -189,17 +205,74 @@ top3Reasons=apply(top3,1,findtopReasons,top=3)
 testSet<-cbind(testSet, top3Reasons)
 
 ## Accuracy Measure
-correctNoPrediction <- sum(testSet$DefaultPayment == "No" & testSet$probabilityScore>0.5, na.rm = TRUE) #6504
-wrongNoPrediction <- sum(testSet$DefaultPayment == "No" & testSet$probabilityScore<=0.5, na.rm = TRUE) #353
+correctNoPrediction <- sum(testSet$DefaultPayment == "No" & testSet$probabilityScore>0.5, na.rm = TRUE) #6488
+wrongNoPrediction <- sum(testSet$DefaultPayment == "No" & testSet$probabilityScore<=0.5, na.rm = TRUE) #357
 
-wrongYesPrediction <- sum(testSet$DefaultPayment == "Yes" & testSet$probabilityScore>0.5, na.rm = TRUE) #1253
-correctYesPrediction <- sum(testSet$DefaultPayment == "Yes" & testSet$probabilityScore<=0.5, na.rm = TRUE) #721
+wrongYesPrediction <- sum(testSet$DefaultPayment == "Yes" & testSet$probabilityScore>0.5, na.rm = TRUE) #1234
+correctYesPrediction <- sum(testSet$DefaultPayment == "Yes" & testSet$probabilityScore<=0.5, na.rm = TRUE) #738
 
 totalCorrectPrediction <- correctYesPrediction + correctNoPrediction
 totalWrongPrediction <- wrongYesPrediction + wrongNoPrediction
 dim(testSet)[1] #8950
 Accuracy <- totalCorrectPrediction / dim(testSet)[1] 
-Accuracy*100 #80.72626
+Accuracy*100 #80.73743
+
+
+
+
+
+
+## Decision Tree
+tree1<-rpart(DefaultPayment ~ Gender + EducationStatus + MarritalStatus + Age + SeptemberStatus 
+             + AugustStatus + JulyStatus + JuneStatus + MayStatus + AprilStatus + SeptemberRem + AugustRem
+             + JulyRem + JuneRem + MayRem + AprilRem + RemToLimit,data=trainingSet, method = "class")
+prp(tree1);
+testSet$tscore1<-predict(tree1, newdata = testSet, type="class")
+
+## Accuracy Measure
+correctNoPrediction <- sum(testSet$DefaultPayment == "No" & testSet$tscore1=="No", na.rm = TRUE) #6680
+wrongNoPrediction <- sum(testSet$DefaultPayment == "No" & testSet$tscore1=="Yes", na.rm = TRUE) #287
+
+wrongYesPrediction <- sum(testSet$DefaultPayment == "Yes" & testSet$tscore1=="No", na.rm = TRUE) #1338
+correctYesPrediction <- sum(testSet$DefaultPayment == "Yes" & testSet$tscore1=="Yes", na.rm = TRUE) #645
+
+totalCorrectPrediction <- correctYesPrediction + correctNoPrediction
+totalWrongPrediction <- wrongYesPrediction + wrongNoPrediction
+dim(testSet)[1] #8950
+Accuracy <- totalCorrectPrediction / dim(testSet)[1] 
+Accuracy*100 #81.84358
+
+## checkout cp from tree1
+printcp(tree1)
+
+tree2<-rpart(DefaultPayment ~ Gender + EducationStatus + MarritalStatus + Age + SeptemberStatus 
+             + AugustStatus + JulyStatus + JuneStatus + MayStatus + AprilStatus + SeptemberRem + AugustRem
+             + JulyRem + JuneRem + MayRem + AprilRem + RemToLimit,data=trainingSet, method = "class",cp=0.001)
+prp(tree2)
+testSet$tscore2<-predict(tree2, newdata = testSet, type='class')
+
+## Accuracy Measure for tree 2
+CNPred <- sum(testSet$DefaultPayment == "No" & testSet$tscore2=="No", na.rm = TRUE) #6610
+WNPred <- sum(testSet$DefaultPayment == "No" & testSet$tscore2=="Yes", na.rm = TRUE) #357
+
+WYPred <- sum(testSet$DefaultPayment == "Yes" & testSet$tscore2=="No", na.rm = TRUE) #1268
+CYPred <- sum(testSet$DefaultPayment == "Yes" & testSet$tscore2=="Yes", na.rm = TRUE) #715
+
+totalCorrectPrediction <- CYPred + CNPred
+totalWrongPrediction <- WYPred + WNPred
+dim(testSet)[1] #8950
+Accuracy <- totalCorrectPrediction / dim(testSet)[1] 
+Accuracy*100 # 81.84358
+
+## The result is similar as tree1
+
+
+
+
+
+
+
+
 
 ## Accuracy is roughly around 81% which is very good. But if we look at the predictions, it predicted No's correctly
 ## as our dataset has about 70% No values. But the predictions for "Yes" was bad. Infact very bad. More than half
